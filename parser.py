@@ -1,6 +1,8 @@
 import requests
 import json
 import time
+import sqlite3
+from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
 from pathlib import Path
@@ -86,7 +88,86 @@ def parse_leaf_html(html):
     return parts
 
 
-def traverse(app_key, branch_filter, ignore_quick_ref, breadcrumb=None, aria=None, depth=0):
+DB_PATH = Path(__file__).parent / "parser.db"
+
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS parts (
+            path TEXT NOT NULL,
+            leaf TEXT NOT NULL,
+            part_number TEXT NOT NULL,
+            description TEXT NOT NULL,
+            PRIMARY KEY (path, leaf, part_number)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            path TEXT NOT NULL,
+            leaf TEXT NOT NULL,
+            part_number TEXT NOT NULL,
+            change_type TEXT NOT NULL,
+            old_description TEXT,
+            new_description TEXT
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+def sync_parts(conn, path, leaf, new_parts):
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "SELECT part_number, description FROM parts WHERE path = ? AND leaf = ?",
+        (path, leaf),
+    )
+    old_parts = {row[0]: row[1] for row in cur.fetchall()}
+
+    added = set(new_parts.keys()) - set(old_parts.keys())
+    removed = set(old_parts.keys()) - set(new_parts.keys())
+    common = set(new_parts.keys()) & set(old_parts.keys())
+
+    for pn in added:
+        conn.execute(
+            "INSERT INTO parts (path, leaf, part_number, description) VALUES (?, ?, ?, ?)",
+            (path, leaf, pn, new_parts[pn]),
+        )
+        conn.execute(
+            "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (now, path, leaf, pn, "added", None, new_parts[pn]),
+        )
+        print(f"  [+] {pn} — {new_parts[pn]}")
+
+    for pn in removed:
+        conn.execute(
+            "DELETE FROM parts WHERE path = ? AND leaf = ? AND part_number = ?",
+            (path, leaf, pn),
+        )
+        conn.execute(
+            "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (now, path, leaf, pn, "removed", old_parts[pn], None),
+        )
+        print(f"  [-] {pn} — {old_parts[pn]}")
+
+    for pn in common:
+        if new_parts[pn] != old_parts[pn]:
+            conn.execute(
+                "UPDATE parts SET description = ? WHERE path = ? AND leaf = ? AND part_number = ?",
+                (new_parts[pn], path, leaf, pn),
+            )
+            conn.execute(
+                "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (now, path, leaf, pn, "modified", old_parts[pn], new_parts[pn]),
+            )
+            print(f"  [~] {pn} — \"{old_parts[pn]}\" -> \"{new_parts[pn]}\"")
+
+    conn.commit()
+
+
+def traverse(app_key, branch_filter, ignore_quick_ref, conn, breadcrumb=None, aria=None, depth=0):
     if breadcrumb is None:
         breadcrumb = []
 
@@ -106,23 +187,27 @@ def traverse(app_key, branch_filter, ignore_quick_ref, breadcrumb=None, aria=Non
         current_breadcrumb = breadcrumb + [node_name]
 
         if node_slug == "":
-            traverse(app_key, branch_filter, ignore_quick_ref, current_breadcrumb, node_aria, depth + 1)
+            traverse(app_key, branch_filter, ignore_quick_ref, conn, current_breadcrumb, node_aria, depth + 1)
         else:
             result = fetch_leaf(app_key, node_slug)
             parts = parse_leaf_html(result.get("html", ""))
-            print(f"[PATH] {' > '.join(current_breadcrumb)}")
-            print(f"[DATA] {json.dumps(parts, indent=2, ensure_ascii=False)}")
+            path = " > ".join(breadcrumb) if breadcrumb else ""
+            print(f"[PATH] {path}")
+            print(f"[LEAF] {node_name}")
+            sync_parts(conn, path, node_name, parts)
             print("=" * 60)
 
 
 def main():
     app_key = get_app_key()
     branch_filter, ignore_quick_ref = load_config()
+    conn = init_db()
     print(f"App Key: {app_key}")
     print(f"Branch Filter: {branch_filter}")
     print(f"Ignore .Quick Reference: {ignore_quick_ref}")
     print("=" * 60)
-    traverse(app_key, branch_filter, ignore_quick_ref)
+    traverse(app_key, branch_filter, ignore_quick_ref, conn)
+    conn.close()
 
 
 if __name__ == "__main__":
