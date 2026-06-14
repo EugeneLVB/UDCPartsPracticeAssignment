@@ -276,6 +276,8 @@ def sync_parts(conn, path, leaf, new_parts, run_ts):
 
     added = set(new_parts.keys()) - set(old_parts.keys())
     common = set(new_parts.keys()) & set(old_parts.keys())
+    added_count = 0
+    modified_count = 0
 
     try:
         for pn in added:
@@ -287,6 +289,7 @@ def sync_parts(conn, path, leaf, new_parts, run_ts):
                 "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ts, path, leaf, pn, "part_added", None, new_parts[pn]),
             )
+            added_count += 1
             log.info("[+PART] %s | %s | %s — %s", path, leaf, pn, new_parts[pn])
 
         for pn in common:
@@ -299,6 +302,7 @@ def sync_parts(conn, path, leaf, new_parts, run_ts):
                     "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (run_ts, path, leaf, pn, "part_modified", old_parts[pn], new_parts[pn]),
                 )
+                modified_count += 1
                 log.info("[~PART] %s | %s | %s — \"%s\" -> \"%s\"", path, leaf, pn, old_parts[pn], new_parts[pn])
 
         conn.execute(
@@ -312,8 +316,10 @@ def sync_parts(conn, path, leaf, new_parts, run_ts):
         conn.rollback()
         raise
 
+    return added_count, modified_count
 
-def traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, breadcrumb=None, aria=None, depth=0):
+
+def traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, stats, breadcrumb=None, aria=None, depth=0):
     if breadcrumb is None:
         breadcrumb = []
 
@@ -340,14 +346,17 @@ def traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, breadcrumb=
         current_breadcrumb = breadcrumb + [node_name]
 
         if node_slug == "":
-            traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, current_breadcrumb, node_aria, depth + 1)
+            traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, stats, current_breadcrumb, node_aria, depth + 1)
         else:
             leaf_names.append(node_name)
             try:
                 result = fetch_leaf(app_key, node_slug)
                 parts = parse_leaf_html(result.get("html", ""))
                 log.info("[PATH] %s [LEAF] %s", path, node_name)
-                sync_parts(conn, path, node_name, parts, run_ts)
+                added, modified = sync_parts(conn, path, node_name, parts, run_ts)
+                stats["total"] += len(parts)
+                stats["added"] += added
+                stats["modified"] += modified
             except Exception:
                 log.error("Failed processing leaf=%s at path=%s", node_name, path)
 
@@ -407,12 +416,13 @@ def main():
     log.info("Filters: %s", filters)
     log.info("Ignore .Quick Reference: %s", ignore_quick_ref)
 
+    stats = {"total": 0, "added": 0, "modified": 0}
     for branch_filter in filters:
-        traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts)
+        traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, stats)
 
     export_csv(conn)
     conn.close()
-    log.info("Parser run complete")
+    log.info("=== Summary: total=%d, new=%d, updated=%d ===", stats["total"], stats["added"], stats["modified"])
 
 
 if __name__ == "__main__":
