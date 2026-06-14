@@ -30,15 +30,32 @@ def get_app_key():
     return app_key
 
 
+def validate_filters(filters):
+    for i, a in enumerate(filters):
+        for j, b in enumerate(filters):
+            if i == j:
+                continue
+            prefix_len = min(len(a), len(b))
+            if a[:prefix_len] == b[:prefix_len]:
+                raise ValueError(
+                    f"Filters overlap: {a} and {b} — one is a prefix of the other"
+                )
+
+
 def load_config():
     config_path = Path(__file__).parent / "config.json"
     if not config_path.exists():
-        return [], True
+        return [[]], True
     with open(config_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    branches = data.get("branches", [])
+    raw = data.get("branches", [])
+    if raw and isinstance(raw[0], str):
+        filters = [raw]
+    else:
+        filters = raw if raw else [[]]
+    validate_filters(filters)
     ignore_quick_ref = data.get("ignore_quick_reference", True)
-    return branches, ignore_quick_ref
+    return filters, ignore_quick_ref
 
 
 def build_params(app_key, aria=None, ariq=None):
@@ -188,13 +205,14 @@ def traverse(app_key, branch_filter, ignore_quick_ref, conn, breadcrumb=None, ar
 
 def main():
     app_key = get_app_key()
-    branch_filter, ignore_quick_ref = load_config()
+    filters, ignore_quick_ref = load_config()
     conn = init_db()
     print(f"App Key: {app_key}")
-    print(f"Branch Filter: {branch_filter}")
+    print(f"Filters: {filters}")
     print(f"Ignore .Quick Reference: {ignore_quick_ref}")
     print("=" * 60)
-    traverse(app_key, branch_filter, ignore_quick_ref, conn)
+    for branch_filter in filters:
+        traverse(app_key, branch_filter, ignore_quick_ref, conn)
     conn.close()
 
 
