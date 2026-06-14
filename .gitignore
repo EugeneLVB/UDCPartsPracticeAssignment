@@ -1,5 +1,6 @@
 # config.json
 parser.db
 parser.log
+export.csv
 
 tests.py

@@ -140,6 +140,8 @@ def parse_leaf_html(html):
         if not (part_number_div and desc_div):
             continue
         part_number = part_number_div.get_text(strip=True)
+        if part_number == "N/A":
+            continue
         desc_text = desc_div.find(string=True, recursive=False)
         if not desc_text:
             log.warning("Empty description for part_number=%s, skipping", part_number)
@@ -356,6 +358,29 @@ def traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, breadcrumb=
             log.error("Failed syncing leaves at path=%s", path)
 
 
+def export_csv(conn):
+    import csv
+    csv_path = Path(__file__).parent / "export.csv"
+    try:
+        cur = conn.execute(
+            "SELECT path, leaf, part_number, description FROM parts ORDER BY path, leaf, part_number"
+        )
+        rows = cur.fetchall()
+    except sqlite3.Error as e:
+        log.error("Failed to read parts for CSV export: %s", e)
+        return
+    try:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["PATH", "OEM", "Description"])
+            for path, leaf, part_number, description in rows:
+                full_path = f"{path} > {leaf}" if path else leaf
+                writer.writerow([full_path, part_number, description])
+        log.info("Exported %d rows to %s", len(rows), csv_path)
+    except OSError as e:
+        log.error("Failed to write CSV: %s", e)
+
+
 def main():
     log.info("Starting parser run")
     run_ts = datetime.now(timezone.utc).isoformat()
@@ -385,6 +410,7 @@ def main():
     for branch_filter in filters:
         traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts)
 
+    export_csv(conn)
     conn.close()
     log.info("Parser run complete")
 
