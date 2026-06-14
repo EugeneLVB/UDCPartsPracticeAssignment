@@ -155,6 +155,14 @@ def init_db():
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS leaves (
+                path TEXT NOT NULL,
+                leaf TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (path, leaf)
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS parts (
                 path TEXT NOT NULL,
                 leaf TEXT NOT NULL,
@@ -168,11 +176,21 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 path TEXT NOT NULL,
-                leaf TEXT NOT NULL,
-                part_number TEXT NOT NULL,
+                leaf TEXT,
+                part_number TEXT,
                 change_type TEXT NOT NULL,
-                old_description TEXT,
-                new_description TEXT
+                old_value TEXT,
+                new_value TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                path TEXT NOT NULL,
+                leaf TEXT,
+                leaf_count INTEGER,
+                part_count INTEGER
             )
         """)
         conn.commit()
@@ -182,8 +200,68 @@ def init_db():
     return conn
 
 
-def sync_parts(conn, path, leaf, new_parts):
-    now = datetime.now(timezone.utc).isoformat()
+def sync_leaves(conn, path, current_leaves, run_ts):
+    try:
+        cur = conn.execute(
+            "SELECT leaf, active FROM leaves WHERE path = ?", (path,)
+        )
+        old_leaves = {row[0]: row[1] for row in cur.fetchall()}
+    except sqlite3.Error as e:
+        log.error("DB read error for leaves path=%s: %s", path, e)
+        raise
+
+    current_set = set(current_leaves)
+    old_set = set(old_leaves.keys())
+
+    try:
+        for leaf in current_set - old_set:
+            conn.execute(
+                "INSERT INTO leaves (path, leaf, active) VALUES (?, ?, 1)",
+                (path, leaf),
+            )
+            conn.execute(
+                "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ts, path, leaf, None, "leaf_added", None, leaf),
+            )
+            log.info("[+LEAF] %s | %s", path, leaf)
+
+        for leaf in current_set & old_set:
+            if old_leaves[leaf] == 0:
+                conn.execute(
+                    "UPDATE leaves SET active = 1 WHERE path = ? AND leaf = ?",
+                    (path, leaf),
+                )
+                conn.execute(
+                    "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (run_ts, path, leaf, None, "leaf_returned", None, leaf),
+                )
+                log.info("[↩LEAF] %s | %s", path, leaf)
+
+        for leaf in old_set - current_set:
+            if old_leaves[leaf] == 1:
+                conn.execute(
+                    "UPDATE leaves SET active = 0 WHERE path = ? AND leaf = ?",
+                    (path, leaf),
+                )
+                conn.execute(
+                    "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (run_ts, path, leaf, None, "leaf_disappeared", leaf, None),
+                )
+                log.info("[-LEAF] %s | %s", path, leaf)
+
+        conn.execute(
+            "INSERT INTO snapshots (timestamp, path, leaf, leaf_count, part_count) VALUES (?, ?, ?, ?, ?)",
+            (run_ts, path, None, len(current_set), None),
+        )
+
+        conn.commit()
+    except sqlite3.Error as e:
+        log.error("DB write error for leaves path=%s: %s", path, e)
+        conn.rollback()
+        raise
+
+
+def sync_parts(conn, path, leaf, new_parts, run_ts):
     try:
         cur = conn.execute(
             "SELECT part_number, description FROM parts WHERE path = ? AND leaf = ?",
@@ -204,10 +282,10 @@ def sync_parts(conn, path, leaf, new_parts):
                 (path, leaf, pn, new_parts[pn]),
             )
             conn.execute(
-                "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (now, path, leaf, pn, "added", None, new_parts[pn]),
+                "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ts, path, leaf, pn, "part_added", None, new_parts[pn]),
             )
-            log.info("[+] %s | %s > %s | %s — %s", path, leaf, pn, pn, new_parts[pn])
+            log.info("[+PART] %s | %s | %s — %s", path, leaf, pn, new_parts[pn])
 
         for pn in common:
             if new_parts[pn] != old_parts[pn]:
@@ -216,10 +294,15 @@ def sync_parts(conn, path, leaf, new_parts):
                     (new_parts[pn], path, leaf, pn),
                 )
                 conn.execute(
-                    "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (now, path, leaf, pn, "modified", old_parts[pn], new_parts[pn]),
+                    "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (run_ts, path, leaf, pn, "part_modified", old_parts[pn], new_parts[pn]),
                 )
-                log.info("[~] %s | %s | %s — \"%s\" -> \"%s\"", path, leaf, pn, old_parts[pn], new_parts[pn])
+                log.info("[~PART] %s | %s | %s — \"%s\" -> \"%s\"", path, leaf, pn, old_parts[pn], new_parts[pn])
+
+        conn.execute(
+            "INSERT INTO snapshots (timestamp, path, leaf, leaf_count, part_count) VALUES (?, ?, ?, ?, ?)",
+            (run_ts, path, leaf, None, len(new_parts)),
+        )
 
         conn.commit()
     except sqlite3.Error as e:
@@ -228,7 +311,7 @@ def sync_parts(conn, path, leaf, new_parts):
         raise
 
 
-def traverse(app_key, branch_filter, ignore_quick_ref, conn, breadcrumb=None, aria=None, depth=0):
+def traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, breadcrumb=None, aria=None, depth=0):
     if breadcrumb is None:
         breadcrumb = []
 
@@ -237,6 +320,9 @@ def traverse(app_key, branch_filter, ignore_quick_ref, conn, breadcrumb=None, ar
     except Exception:
         log.error("Skipping branch at depth=%d, breadcrumb=%s", depth, breadcrumb)
         return
+
+    leaf_names = []
+    path = " > ".join(breadcrumb) if breadcrumb else ""
 
     for node in nodes:
         node_name = node["data"]
@@ -252,20 +338,28 @@ def traverse(app_key, branch_filter, ignore_quick_ref, conn, breadcrumb=None, ar
         current_breadcrumb = breadcrumb + [node_name]
 
         if node_slug == "":
-            traverse(app_key, branch_filter, ignore_quick_ref, conn, current_breadcrumb, node_aria, depth + 1)
+            traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts, current_breadcrumb, node_aria, depth + 1)
         else:
+            leaf_names.append(node_name)
             try:
                 result = fetch_leaf(app_key, node_slug)
                 parts = parse_leaf_html(result.get("html", ""))
-                path = " > ".join(breadcrumb) if breadcrumb else ""
                 log.info("[PATH] %s [LEAF] %s", path, node_name)
-                sync_parts(conn, path, node_name, parts)
+                sync_parts(conn, path, node_name, parts, run_ts)
             except Exception:
-                log.error("Failed processing leaf=%s at path=%s", node_name, " > ".join(breadcrumb))
+                log.error("Failed processing leaf=%s at path=%s", node_name, path)
+
+    if leaf_names:
+        try:
+            sync_leaves(conn, path, leaf_names, run_ts)
+        except Exception:
+            log.error("Failed syncing leaves at path=%s", path)
 
 
 def main():
     log.info("Starting parser run")
+    run_ts = datetime.now(timezone.utc).isoformat()
+
     try:
         app_key = get_app_key()
     except Exception:
@@ -289,7 +383,7 @@ def main():
     log.info("Ignore .Quick Reference: %s", ignore_quick_ref)
 
     for branch_filter in filters:
-        traverse(app_key, branch_filter, ignore_quick_ref, conn)
+        traverse(app_key, branch_filter, ignore_quick_ref, conn, run_ts)
 
     conn.close()
     log.info("Parser run complete")
