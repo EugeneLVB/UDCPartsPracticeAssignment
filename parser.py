@@ -127,7 +127,6 @@ def sync_parts(conn, path, leaf, new_parts):
     old_parts = {row[0]: row[1] for row in cur.fetchall()}
 
     added = set(new_parts.keys()) - set(old_parts.keys())
-    removed = set(old_parts.keys()) - set(new_parts.keys())
     common = set(new_parts.keys()) & set(old_parts.keys())
 
     for pn in added:
@@ -140,17 +139,6 @@ def sync_parts(conn, path, leaf, new_parts):
             (now, path, leaf, pn, "added", None, new_parts[pn]),
         )
         print(f"  [+] {pn} — {new_parts[pn]}")
-
-    for pn in removed:
-        conn.execute(
-            "DELETE FROM parts WHERE path = ? AND leaf = ? AND part_number = ?",
-            (path, leaf, pn),
-        )
-        conn.execute(
-            "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (now, path, leaf, pn, "removed", old_parts[pn], None),
-        )
-        print(f"  [-] {pn} — {old_parts[pn]}")
 
     for pn in common:
         if new_parts[pn] != old_parts[pn]:
