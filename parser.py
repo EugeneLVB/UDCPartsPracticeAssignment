@@ -2,11 +2,23 @@ import requests
 import json
 import time
 import sqlite3
+import logging
 from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 
+
+LOG_PATH = Path(__file__).parent / "parser.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+log = logging.getLogger(__name__)
 
 URL_ASSEMBLY = "https://partstreamstg.arinet.com/Parts/GetAssembly"
 URL_DETAILS = "https://partstreamstg.arinet.com/Parts/GetDetails"
@@ -17,15 +29,22 @@ HEADERS = {
 
 
 def get_app_key():
-    r = requests.get(IFRAME_URL, headers=HEADERS)
+    try:
+        r = requests.get(IFRAME_URL, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        log.error("Failed to fetch iframe page: %s", e)
+        raise
     soup = BeautifulSoup(r.text, "html.parser")
     script_tag = soup.find("script", id="aripartstream")
     if not script_tag or not script_tag.get("src"):
+        log.error("Cannot find aripartstream script tag or its src attribute")
         raise RuntimeError("Cannot find aripartstream script tag or its src attribute")
     parsed_url = urlparse(script_tag["src"])
     query_params = parse_qs(parsed_url.query)
     app_key = query_params.get("appKey", [None])[0]
     if not app_key:
+        log.error("appKey not found in script src URL")
         raise RuntimeError("appKey not found in script src URL")
     return app_key
 
@@ -45,9 +64,14 @@ def validate_filters(filters):
 def load_config():
     config_path = Path(__file__).parent / "config.json"
     if not config_path.exists():
+        log.warning("config.json not found, using defaults")
         return [[]], True
-    with open(config_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        log.error("Failed to read config.json: %s", e)
+        raise
     raw = data.get("branches", [])
     if raw and isinstance(raw[0], str):
         filters = [raw]
@@ -78,17 +102,33 @@ def build_params(app_key, aria=None, ariq=None):
 
 def fetch_children(app_key, aria=None):
     params = build_params(app_key, aria=aria)
-    resp = requests.get(URL_ASSEMBLY, params=params, headers=HEADERS)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["model"]["json"]
+    try:
+        resp = requests.get(URL_ASSEMBLY, params=params, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        log.error("Failed to fetch children (aria=%s): %s", aria, e)
+        raise
+    try:
+        data = resp.json()
+        return data["model"]["json"]
+    except (json.JSONDecodeError, KeyError) as e:
+        log.error("Unexpected response structure for children (aria=%s): %s", aria, e)
+        raise
 
 
 def fetch_leaf(app_key, slug):
     params = build_params(app_key, ariq=slug)
-    resp = requests.get(URL_DETAILS, params=params, headers=HEADERS)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = requests.get(URL_DETAILS, params=params, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        log.error("Failed to fetch leaf (slug=%s): %s", slug, e)
+        raise
+    try:
+        return resp.json()
+    except json.JSONDecodeError as e:
+        log.error("Invalid JSON in leaf response (slug=%s): %s", slug, e)
+        raise
 
 
 def parse_leaf_html(html):
@@ -100,8 +140,11 @@ def parse_leaf_html(html):
         if not (part_number_div and desc_div):
             continue
         part_number = part_number_div.get_text(strip=True)
-        description = desc_div.find(string=True, recursive=False).strip()
-        parts[part_number] = description
+        desc_text = desc_div.find(string=True, recursive=False)
+        if not desc_text:
+            log.warning("Empty description for part_number=%s, skipping", part_number)
+            continue
+        parts[part_number] = desc_text.strip()
     return parts
 
 
@@ -109,74 +152,91 @@ DB_PATH = Path(__file__).parent / "parser.db"
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS parts (
-            path TEXT NOT NULL,
-            leaf TEXT NOT NULL,
-            part_number TEXT NOT NULL,
-            description TEXT NOT NULL,
-            PRIMARY KEY (path, leaf, part_number)
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS changes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            path TEXT NOT NULL,
-            leaf TEXT NOT NULL,
-            part_number TEXT NOT NULL,
-            change_type TEXT NOT NULL,
-            old_description TEXT,
-            new_description TEXT
-        )
-    """)
-    conn.commit()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS parts (
+                path TEXT NOT NULL,
+                leaf TEXT NOT NULL,
+                part_number TEXT NOT NULL,
+                description TEXT NOT NULL,
+                PRIMARY KEY (path, leaf, part_number)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS changes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                path TEXT NOT NULL,
+                leaf TEXT NOT NULL,
+                part_number TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                old_description TEXT,
+                new_description TEXT
+            )
+        """)
+        conn.commit()
+    except sqlite3.Error as e:
+        log.error("Failed to initialize database: %s", e)
+        raise
     return conn
 
 
 def sync_parts(conn, path, leaf, new_parts):
     now = datetime.now(timezone.utc).isoformat()
-    cur = conn.execute(
-        "SELECT part_number, description FROM parts WHERE path = ? AND leaf = ?",
-        (path, leaf),
-    )
-    old_parts = {row[0]: row[1] for row in cur.fetchall()}
+    try:
+        cur = conn.execute(
+            "SELECT part_number, description FROM parts WHERE path = ? AND leaf = ?",
+            (path, leaf),
+        )
+        old_parts = {row[0]: row[1] for row in cur.fetchall()}
+    except sqlite3.Error as e:
+        log.error("DB read error for path=%s leaf=%s: %s", path, leaf, e)
+        raise
 
     added = set(new_parts.keys()) - set(old_parts.keys())
     common = set(new_parts.keys()) & set(old_parts.keys())
 
-    for pn in added:
-        conn.execute(
-            "INSERT INTO parts (path, leaf, part_number, description) VALUES (?, ?, ?, ?)",
-            (path, leaf, pn, new_parts[pn]),
-        )
-        conn.execute(
-            "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (now, path, leaf, pn, "added", None, new_parts[pn]),
-        )
-        print(f"  [+] {pn} — {new_parts[pn]}")
-
-    for pn in common:
-        if new_parts[pn] != old_parts[pn]:
+    try:
+        for pn in added:
             conn.execute(
-                "UPDATE parts SET description = ? WHERE path = ? AND leaf = ? AND part_number = ?",
-                (new_parts[pn], path, leaf, pn),
+                "INSERT INTO parts (path, leaf, part_number, description) VALUES (?, ?, ?, ?)",
+                (path, leaf, pn, new_parts[pn]),
             )
             conn.execute(
                 "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (now, path, leaf, pn, "modified", old_parts[pn], new_parts[pn]),
+                (now, path, leaf, pn, "added", None, new_parts[pn]),
             )
-            print(f"  [~] {pn} — \"{old_parts[pn]}\" -> \"{new_parts[pn]}\"")
+            log.info("[+] %s | %s > %s | %s — %s", path, leaf, pn, pn, new_parts[pn])
 
-    conn.commit()
+        for pn in common:
+            if new_parts[pn] != old_parts[pn]:
+                conn.execute(
+                    "UPDATE parts SET description = ? WHERE path = ? AND leaf = ? AND part_number = ?",
+                    (new_parts[pn], path, leaf, pn),
+                )
+                conn.execute(
+                    "INSERT INTO changes (timestamp, path, leaf, part_number, change_type, old_description, new_description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (now, path, leaf, pn, "modified", old_parts[pn], new_parts[pn]),
+                )
+                log.info("[~] %s | %s | %s — \"%s\" -> \"%s\"", path, leaf, pn, old_parts[pn], new_parts[pn])
+
+        conn.commit()
+    except sqlite3.Error as e:
+        log.error("DB write error for path=%s leaf=%s: %s", path, leaf, e)
+        conn.rollback()
+        raise
 
 
 def traverse(app_key, branch_filter, ignore_quick_ref, conn, breadcrumb=None, aria=None, depth=0):
     if breadcrumb is None:
         breadcrumb = []
 
-    nodes = fetch_children(app_key, aria)
+    try:
+        nodes = fetch_children(app_key, aria)
+    except Exception:
+        log.error("Skipping branch at depth=%d, breadcrumb=%s", depth, breadcrumb)
+        return
 
     for node in nodes:
         node_name = node["data"]
@@ -194,26 +254,45 @@ def traverse(app_key, branch_filter, ignore_quick_ref, conn, breadcrumb=None, ar
         if node_slug == "":
             traverse(app_key, branch_filter, ignore_quick_ref, conn, current_breadcrumb, node_aria, depth + 1)
         else:
-            result = fetch_leaf(app_key, node_slug)
-            parts = parse_leaf_html(result.get("html", ""))
-            path = " > ".join(breadcrumb) if breadcrumb else ""
-            print(f"[PATH] {path}")
-            print(f"[LEAF] {node_name}")
-            sync_parts(conn, path, node_name, parts)
-            print("=" * 60)
+            try:
+                result = fetch_leaf(app_key, node_slug)
+                parts = parse_leaf_html(result.get("html", ""))
+                path = " > ".join(breadcrumb) if breadcrumb else ""
+                log.info("[PATH] %s [LEAF] %s", path, node_name)
+                sync_parts(conn, path, node_name, parts)
+            except Exception:
+                log.error("Failed processing leaf=%s at path=%s", node_name, " > ".join(breadcrumb))
 
 
 def main():
-    app_key = get_app_key()
-    filters, ignore_quick_ref = load_config()
-    conn = init_db()
-    print(f"App Key: {app_key}")
-    print(f"Filters: {filters}")
-    print(f"Ignore .Quick Reference: {ignore_quick_ref}")
-    print("=" * 60)
+    log.info("Starting parser run")
+    try:
+        app_key = get_app_key()
+    except Exception:
+        log.critical("Cannot obtain app_key, aborting")
+        return
+
+    try:
+        filters, ignore_quick_ref = load_config()
+    except Exception:
+        log.critical("Invalid config, aborting")
+        return
+
+    try:
+        conn = init_db()
+    except Exception:
+        log.critical("Cannot initialize database, aborting")
+        return
+
+    log.info("App Key: %s", app_key)
+    log.info("Filters: %s", filters)
+    log.info("Ignore .Quick Reference: %s", ignore_quick_ref)
+
     for branch_filter in filters:
         traverse(app_key, branch_filter, ignore_quick_ref, conn)
+
     conn.close()
+    log.info("Parser run complete")
 
 
 if __name__ == "__main__":
