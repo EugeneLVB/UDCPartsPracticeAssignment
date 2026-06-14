@@ -76,18 +76,13 @@ def parse_leaf_html(html):
     soup = BeautifulSoup(html, "html.parser")
     parts = {}
     for li in soup.find_all("li"):
-        tag_div = li.find("div", class_="ariPLTag")
         part_number_div = li.find("div", class_="ariPartNumber")
         desc_div = li.find("div", class_="ariPLDesc")
-        if not (tag_div and part_number_div and desc_div):
+        if not (part_number_div and desc_div):
             continue
-        ref_number = tag_div.get_text(strip=True).replace("Ref:", "").strip()
-        ref_key = f"Ref:{ref_number}"
         part_number = part_number_div.get_text(strip=True)
         description = desc_div.find(string=True, recursive=False).strip()
-        if ref_key not in parts:
-            parts[ref_key] = []
-        parts[ref_key].append({"part_number": part_number, "description": description})
+        parts[part_number] = description
     return parts
 
 
@@ -105,7 +100,7 @@ def traverse(app_key, branch_filter, ignore_quick_ref, breadcrumb=None, aria=Non
         if depth < len(branch_filter) and node_name != branch_filter[depth]:
             continue
 
-        if ignore_quick_ref and node_name == ".Quick Reference":
+        if ignore_quick_ref and node_name in (".Quick Reference", "Label Map"):
             continue
 
         current_breadcrumb = breadcrumb + [node_name]
