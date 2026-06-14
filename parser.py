@@ -31,10 +31,12 @@ def get_app_key():
 def load_config():
     config_path = Path(__file__).parent / "config.json"
     if not config_path.exists():
-        return []
+        return [], True
     with open(config_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return data.get("branches", [])
+    branches = data.get("branches", [])
+    ignore_quick_ref = data.get("ignore_quick_reference", True)
+    return branches, ignore_quick_ref
 
 
 def build_params(app_key, aria=None, ariq=None):
@@ -74,16 +76,22 @@ def parse_leaf_html(html):
     soup = BeautifulSoup(html, "html.parser")
     parts = {}
     for li in soup.find_all("li"):
+        tag_div = li.find("div", class_="ariPLTag")
         part_number_div = li.find("div", class_="ariPartNumber")
         desc_div = li.find("div", class_="ariPLDesc")
-        if part_number_div and desc_div:
-            part_number = part_number_div.get_text(strip=True)
-            description = desc_div.get_text(strip=True)
-            parts[part_number] = description
+        if not (tag_div and part_number_div and desc_div):
+            continue
+        ref_number = tag_div.get_text(strip=True).replace("Ref:", "").strip()
+        ref_key = f"Ref:{ref_number}"
+        part_number = part_number_div.get_text(strip=True)
+        description = desc_div.find(string=True, recursive=False).strip()
+        if ref_key not in parts:
+            parts[ref_key] = []
+        parts[ref_key].append({"part_number": part_number, "description": description})
     return parts
 
 
-def traverse(app_key, branch_filter, breadcrumb=None, aria=None, depth=0):
+def traverse(app_key, branch_filter, ignore_quick_ref, breadcrumb=None, aria=None, depth=0):
     if breadcrumb is None:
         breadcrumb = []
 
@@ -97,10 +105,13 @@ def traverse(app_key, branch_filter, breadcrumb=None, aria=None, depth=0):
         if depth < len(branch_filter) and node_name != branch_filter[depth]:
             continue
 
+        if ignore_quick_ref and node_name == ".Quick Reference":
+            continue
+
         current_breadcrumb = breadcrumb + [node_name]
 
         if node_slug == "":
-            traverse(app_key, branch_filter, current_breadcrumb, node_aria, depth + 1)
+            traverse(app_key, branch_filter, ignore_quick_ref, current_breadcrumb, node_aria, depth + 1)
         else:
             result = fetch_leaf(app_key, node_slug)
             parts = parse_leaf_html(result.get("html", ""))
@@ -111,11 +122,12 @@ def traverse(app_key, branch_filter, breadcrumb=None, aria=None, depth=0):
 
 def main():
     app_key = get_app_key()
-    branch_filter = load_config()
+    branch_filter, ignore_quick_ref = load_config()
     print(f"App Key: {app_key}")
     print(f"Branch Filter: {branch_filter}")
+    print(f"Ignore .Quick Reference: {ignore_quick_ref}")
     print("=" * 60)
-    traverse(app_key, branch_filter)
+    traverse(app_key, branch_filter, ignore_quick_ref)
 
 
 if __name__ == "__main__":

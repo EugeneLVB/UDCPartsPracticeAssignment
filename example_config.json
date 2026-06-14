@@ -1,3 +1,4 @@
 {
-  "branches": ["Troy-Bilt", "11-Push Walk-Behind Mowers", "2026 Models" ]
+  "branches": ["Troy-Bilt", "11-Push Walk-Behind Mowers", "2026 Models" ],
+  "ignore_quick_reference": true
 }
