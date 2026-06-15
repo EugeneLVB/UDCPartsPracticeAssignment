@@ -22,7 +22,9 @@ Edit `config.json`:
   "root_prefix": "MTD Merged Data Staging",
   "branches": [
     ["Troy-Bilt", "11-Push Walk-Behind Mowers", "2025 Models"],
-    ["Troy-Bilt", "11-Push Walk-Behind Mowers", "2024 Models"]
+    ["Troy-Bilt", "11-Push Walk-Behind Mowers", "2024 Models"],
+    ["Troy-Bilt", "23-FLEX"],
+    ["Troy-Bilt", "Garden Tools", "Loppers"]
   ],
   "ignore_quick_reference": true
 }
