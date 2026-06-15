@@ -1,7 +1,9 @@
 {
+  "root_prefix": "MTD Merged Data Staging",
   "branches": [
-	["Troy-Bilt", "11-Push Walk-Behind Mowers", "2025 Models"],
-	["Troy-Bilt", "11-Push Walk-Behind Mowers", "2024 Models"]
+    ["Troy-Bilt", "11-Push Walk-Behind Mowers", "2025 Models"],
+    ["Troy-Bilt", "11-Push Walk-Behind Mowers", "2024 Models"],
+    ["MTD (legacy) (SBD Outdoor)", "OEM-Attachments", "2023 Models"]
   ],
   "ignore_quick_reference": true
 }
