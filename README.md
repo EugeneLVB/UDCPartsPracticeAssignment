@@ -62,9 +62,7 @@ python parser.py
    - Program: `C:\Users\USER_NAME\AppData\Local\Python\bin\pythonw.exe`
    - Arguments: `C:\path\to\UDCPartsPracticeAssignment\parser.py`
    - Start in: `C:\path\to\UDCPartsPracticeAssignment`
-   > **⚠️**
-> 
-> Please note that the Python interpreter executable file, python.exe, has been renamed to pythonw.exe. This is necessary to run the script silently as a background task without opening a command window each time the task is launched.
+> **⚠️** Please note that the Python interpreter executable file, python.exe, has been renamed to pythonw.exe. This is necessary to run the script silently as a background task without opening a command window each time the task is launched.
 9. In the next window, make sure everything is set up correctly, then click `Finish`
 > After each scheduled task runs, a parser output file (export.csv) will be created
 
