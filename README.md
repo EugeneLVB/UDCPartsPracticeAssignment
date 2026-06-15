@@ -44,8 +44,6 @@ or
 python3 parser.py
 ```
 
-On repeated runs, only new/changed records are logged. Existing records are updated in-place (upsert by unique key `path + leaf + part_number`).
-
 ## Deploy on Windows (Task Scheduler)
 
 1. Install Python from [python.org](https://www.python.org/downloads/) (check "Add to PATH")
