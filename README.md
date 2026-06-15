@@ -59,7 +59,7 @@ python parser.py
 11. In the `Action` configuration step, select `Start a program` and click `Next`
 12. Since the windows scheduler does not use the environment, you need to find your python interpreter location. To do this open CMD (press `Win+R` > write `cmd` > press `Enter`). In the window that opens, enter the command `python -c "import sys; print(sys.executable)"`. In the response, you'll see something like `C:\Users\USER_NAME\AppData\Local\Python\bin\python.exe`. Copy the path to the Python interpreter and enter it in the scheduler settings window, as shown in `Step 14`
 14. Action: **Start a program**
-   - Program: `C:\Users\USER_NAME\AppData\Local\Python\bin\pythonw.exe`
+   - Program: `C:\Users\USER_NAME\AppData\Local\Python\bin\pythonw.exe` **⚠️**
    - Arguments: `C:\path\to\UDCPartsPracticeAssignment\parser.py`
    - Start in: `C:\path\to\UDCPartsPracticeAssignment`
 > **⚠️** Please note that the Python interpreter executable file, python.exe, has been renamed to pythonw.exe. This is necessary to run the script silently as a background task without opening a command window each time the task is launched.
@@ -70,7 +70,7 @@ python parser.py
 1. Open the link [Google Sheets](https://docs.google.com/spreadsheets/u/0/)
 2. Click on `Blank spreadsheet`
 3. In the new spreadsheet that opens, click `File` > `Import` > Tab `Upload`
-4. Locate and click on the export.csv file in the UDCPartsPracticeAssignment folder
+4. Locate and click on the export.csv file in the `UDCPartsPracticeAssignment` folder
 5. In the next window, just to be safe, you can uncheck the `Convert text to numbers, dates, and formulas` box, and then click `Import data`
 6. Finish
 
