@@ -1,7 +1,5 @@
 # Parts Catalog Parser
 
-Parses parts manuals from [genuinefactoryparts.com](https://www.genuinefactoryparts.com/en_US/ari-partstream.html) and exports structured data to CSV.
-
 ## Output
 
 - `export.csv` — all parts with columns: `PATH`, `OEM`, `Description`
@@ -39,10 +37,6 @@ Example `config.json`:
 ```bash
 python parser.py
 ```
-or
-```bash
-python3 parser.py
-```
 
 ## Deploy on Windows (Task Scheduler)
 
@@ -60,12 +54,27 @@ python3 parser.py
    ```
 7. Open **Task Scheduler** (press `Win+R` > write `taskschd.msc` > press `Enter`)
 8. Click **Create Basic Task**
-9. Set trigger (e.g., Daily at 08:00)
-10. Action: **Start a program**
-   - Program: `python`
+9. Enter the name of the task and click `Next`
+10. In the next window, specify how often you want the script to run
+11. In the `Action` configuration step, select `Start a program` and click `Next`
+12. Since the windows scheduler does not use the environment, you need to find your python interpreter location. To do this open CMD (press `Win+R` > write `cmd` > press `Enter`). In the window that opens, enter the command `python -c "import sys; print(sys.executable)"`. In the response, you'll see something like `C:\Users\USER_NAME\AppData\Local\Python\bin\python.exe`. Copy the path to the Python interpreter and enter it in the scheduler settings window, as shown in `Step 14`
+14. Action: **Start a program**
+   - Program: `C:\Users\USER_NAME\AppData\Local\Python\bin\pythonw.exe`
    - Arguments: `C:\path\to\UDCPartsPracticeAssignment\parser.py`
    - Start in: `C:\path\to\UDCPartsPracticeAssignment`
-9. Finish
+   > **⚠️**
+> 
+> Please note that the Python interpreter executable file, python.exe, has been renamed to pythonw.exe. This is necessary to run the script silently as a background task without opening a command window each time the task is launched.
+9. In the next window, make sure everything is set up correctly, then click `Finish`
+> After each scheduled task runs, a parser output file (export.csv) will be created
+
+## Importing a CSV file into Google Sheets
+1. Open the link [Google Sheets](https://docs.google.com/spreadsheets/u/0/)
+2. Click on `Blank spreadsheet`
+3. In the new spreadsheet that opens, click `File` > `Import` > Tab `Upload`
+4. Locate and click on the export.csv file in the UDCPartsPracticeAssignment folder
+5. In the next window, just to be safe, you can uncheck the `Convert text to numbers, dates, and formulas` box, and then click `Import data`
+6. Finish
 
 ## Log output example
 
