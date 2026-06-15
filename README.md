@@ -65,7 +65,7 @@ python3 parser.py
    - Program: `python`
    - Arguments: `C:\path\to\UDCPartsPracticeAssignment\parser.py`
    - Start in: `C:\path\to\UDCPartsPracticeAssignment`
-11. Finish
+9. Finish
 
 ## Log output example
 
