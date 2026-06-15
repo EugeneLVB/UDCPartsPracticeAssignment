@@ -15,7 +15,7 @@ Parses parts manuals from [genuinefactoryparts.com](https://www.genuinefactorypa
 
 ## Configuration
 
-Edit `config.json`:
+Example `config.json`:
 
 ```json
 {
