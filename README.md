@@ -70,7 +70,7 @@ python parser.py
 1. Open the link [Google Sheets](https://docs.google.com/spreadsheets/u/0/)
 2. Click on `Blank spreadsheet`
 3. In the new spreadsheet that opens, click `File` > `Import` > Tab `Upload`
-4. Locate and click on the export.csv file in the `UDCPartsPracticeAssignment` folder
+4. Locate and click on the `export.csv` file in the `UDCPartsPracticeAssignment` folder
 5. In the next window, just to be safe, you can uncheck the `Convert text to numbers, dates, and formulas` box, and then click `Import data`
 6. Finish
 
