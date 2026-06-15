@@ -52,18 +52,18 @@ python parser.py
    # Install dependencies
    pip install -r requirements.txt
    ```
-7. Open **Task Scheduler** (press `Win+R` > write `taskschd.msc` > press `Enter`)
-8. Click **Create Basic Task**
-9. Enter the name of the task and click `Next`
-10. In the next window, specify how often you want the script to run
-11. In the `Action` configuration step, select `Start a program` and click `Next`
-12. Since the windows scheduler does not use the environment, you need to find your python interpreter location. To do this open CMD (press `Win+R` > write `cmd` > press `Enter`). In the window that opens, enter the command `python -c "import sys; print(sys.executable)"`. In the response, you'll see something like `C:\Users\USER_NAME\AppData\Local\Python\bin\python.exe`. Copy the path to the Python interpreter and enter it in the scheduler settings window, as shown in `Step 14`
-14. Action: **Start a program**
+5. Open **Task Scheduler** (press `Win+R` > write `taskschd.msc` > press `Enter`)
+6. Click **Create Basic Task**
+7. Enter the name of the task and click `Next`
+8. In the next window, specify how often you want the script to run
+9. In the `Action` configuration step, select `Start a program` and click `Next`
+10. Since the windows scheduler does not use the environment, you need to find your python interpreter location. To do this open CMD (press `Win+R` > write `cmd` > press `Enter`). In the window that opens, enter the command `python -c "import sys; print(sys.executable)"`. In the response, you'll see something like `C:\Users\USER_NAME\AppData\Local\Python\bin\python.exe`. Copy the path to the Python interpreter and enter it in the scheduler settings window, as shown in `Step 11`
+11. Action: **Start a program**
    - Program: `C:\Users\USER_NAME\AppData\Local\Python\bin\pythonw.exe` **⚠️**
    - Arguments: `C:\path\to\UDCPartsPracticeAssignment\parser.py`
    - Start in: `C:\path\to\UDCPartsPracticeAssignment`
 > **⚠️** Please note that the Python interpreter executable file, python.exe, has been renamed to pythonw.exe. This is necessary to run the script silently as a background task without opening a command window each time the task is launched.
-9. In the next window, make sure everything is set up correctly, then click `Finish`
+12. In the next window, make sure everything is set up correctly, then click `Finish`
 > After each scheduled task runs, a parser output file (export.csv) will be created
 
 ## Importing a CSV file into Google Sheets
